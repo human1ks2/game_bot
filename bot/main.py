@@ -1,48 +1,83 @@
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from aiogram.filters import CommandStart
 import asyncio
+import logging
 import os
+import re
+from aiogram import Bot, Dispatcher, types
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils import executor
 from dotenv import load_dotenv
 
-# Загружаем переменные окружения из .env файла
 load_dotenv()
 
-# Получаем токен бота из переменных окружения
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_TOKEN = os.getenv("BOT_TOKEN")
 
-# Проверяем наличие токена
-if not BOT_TOKEN:
-    raise ValueError("Переменная окружения BOT_TOKEN не установлена!")
+logging.basicConfig(level=logging.INFO)
 
-# Инициализация бота и диспетчера
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+bot = Bot(token=API_TOKEN, parse_mode=types.ParseMode.HTML)
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 
-@dp.message(CommandStart())
-async def start_handler(message: types.Message) -> None:
-    """
-    Хэндлер для обработки команды /start.
-    Отправляет пользователю приветственное сообщение с кнопкой "Играть".
-    """
-    # Инлайн-кнопка с WebApp
-    play_button = InlineKeyboardButton(
-        text="🎮 Играть",
-        web_app=WebAppInfo(url="https://hostscore.ru/")
+
+# Главное меню
+main_menu_kb = InlineKeyboardMarkup(row_width=2)
+main_menu_kb.add(
+    InlineKeyboardButton("📝 Регистрация", callback_data="register"),
+    InlineKeyboardButton("📖 Инструкция", callback_data="instruction")
+)
+main_menu_kb.add(InlineKeyboardButton("🆘 HELP", url="https://t.me/your_support_bot"))
+main_menu_kb.add(InlineKeyboardButton("🚀 ПОЛУЧИТЬ СИГНАЛ", web_app=types.WebAppInfo(url="https://hostscore.ru")))
+
+
+# Меню после ошибки регистрации
+registration_error_kb = InlineKeyboardMarkup(row_width=1)
+registration_error_kb.add(
+    InlineKeyboardButton("🔁 Зарегистрироваться", callback_data="register"),
+    InlineKeyboardButton("🏠 Вернуться в главное меню", callback_data="main_menu")
+)
+
+# Меню инструкции
+instruction_kb = InlineKeyboardMarkup()
+instruction_kb.add(InlineKeyboardButton("🏠 Вернуться в главное меню", callback_data="main_menu"))
+
+
+@dp.message_handler(commands=["start"])
+async def start_command(message: types.Message):
+    await message.answer("👋 Привет! Добро пожаловать в игру. Выберите действие:", reply_markup=main_menu_kb)
+
+
+@dp.callback_query_handler(lambda c: c.data == "register")
+async def handle_registration(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)
+    await bot.edit_message_text(
+        text="❌ Ошибка, регистрация не пройдена.",
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        reply_markup=registration_error_kb
     )
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[play_button]])
 
-    await message.answer(
-        "Добро пожаловать в игру! Нажми кнопку ниже, чтобы начать играть 🎲",
-        reply_markup=keyboard
+
+@dp.callback_query_handler(lambda c: c.data == "instruction")
+async def handle_instruction(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)
+    await bot.edit_message_text(
+        text="📘 Инструкция:\n1. Нажмите \"Регистрация\"\n2. Следуйте шагам на сайте\n3. После регистрации вы получите доступ к сигналам.",
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        reply_markup=instruction_kb
     )
 
-async def main() -> None:
-    """
-    Основная функция для запуска бота.
-    """
-    await dp.start_polling(bot)
 
-# Точка входа
+@dp.callback_query_handler(lambda c: c.data == "main_menu")
+async def back_to_main_menu(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)
+    await bot.edit_message_text(
+        text="🏠 Вернуться в главное меню:",
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        reply_markup=main_menu_kb
+    )
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    executor.start_polling(dp, skip_updates=True)
